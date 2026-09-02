@@ -1,0 +1,98 @@
+@import "leaflet/dist/leaflet.css";
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-main: #0b1120;
+    --bg-surface: #131d31;
+    --bg-card: #18233c;
+    --border-color: #2a3a5a;
+    --kz-blue: #0284c7;
+    --kz-gold: #f59e0b;
+    --fire-red: #dc2626;
+    --fire-orange: #ea580c;
+    --success-green: #16a34a;
+  }
+
+  body {
+    background-color: #0b1120;
+    color: #f1f5f9;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Professional Situational Center Cards */
+.mchs-card {
+  background-color: #131d31;
+  border: 1px solid #233350;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.mchs-card-header {
+  background-color: #0e1728;
+  border-bottom: 1px solid #233350;
+}
+
+.mchs-card-danger {
+  background-color: #18141e;
+  border: 1.5px solid #dc2626;
+  box-shadow: 0 4px 16px rgba(220, 38, 38, 0.2);
+}
+
+.mchs-card-success {
+  background-color: #101d1c;
+  border: 1.5px solid #16a34a;
+  box-shadow: 0 4px 16px rgba(22, 163, 74, 0.2);
+}
+
+/* Real-world Leaflet map styling */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  background: #0b1120 !important;
+  font-family: inherit;
+}
+
+.leaflet-popup-content-wrapper {
+  background: #131d31 !important;
+  color: #f8fafc !important;
+  border: 1px solid #33496e !important;
+  border-radius: 8px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6) !important;
+  padding: 2px !important;
+}
+
+.leaflet-popup-tip {
+  background: #131d31 !important;
+}
+
+/* Realistic Pulse Animations */
+@keyframes fire-beacon {
+  0% { transform: scale(0.95); opacity: 0.9; }
+  50% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.9; }
+}
+
+.animate-fire-beacon {
+  animation: fire-beacon 1.8s ease-in-out infinite;
+}
+
+/* Clean Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0e1728;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a3a5a;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3b5078;
+}
