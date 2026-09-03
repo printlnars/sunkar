@@ -53,6 +53,10 @@ export interface InterceptRoute {
   unit_name: string;
   route_name: string;
   waypoints: [number, number][];
+  start_name?: string;
+  start_coords?: [number, number];
+  target_name?: string;
+  target_coords?: [number, number];
   estimated_arrival_minutes: number;
   safe_passage_clearance: string;
 }
@@ -94,10 +98,13 @@ export interface EmergencyUnit {
   callsign: string;
   unit_type: string;
   base_station: string;
+  base_lat?: number;
+  base_lon?: number;
   lat: number;
   lon: number;
   target_lat?: number;
   target_lon?: number;
+  target_name?: string;
   status: UnitStatus;
   personnel_count: number;
   water_capacity_l?: number;

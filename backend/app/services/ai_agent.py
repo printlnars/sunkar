@@ -9,7 +9,7 @@ logger = logging.getLogger("sunkar.ai_agent")
 class SunkarAIAgent:
     """
     Intelligent Dispatch & Tactical Operations AI Agent.
-    Combines Rothermel physics calculations with LLM (Google Gemini) or Expert Tactical Rules
+    Combines Rothermel physics calculations with expert tactical rules
     to formulate real-time emergency intercept plans and narrative verdicts.
     """
 
@@ -30,7 +30,6 @@ class SunkarAIAgent:
         """
         Generates tactical situation assessment and structured dispatch orders.
         """
-        # Formulate expert tactical narrative based on real MES / МЧС RK operational rules
         wind_direction_ru = weather.wind_direction_label
         wind_spd = weather.wind_speed_ms
         threat_level = ThreatLevel.CRITICAL if time_to_asset_min <= 60 else ThreatLevel.HIGH
@@ -79,33 +78,33 @@ class SunkarAIAgent:
             uid = u.get("id", "UNIT")
             uname = u.get("name", "Расчет МЧС")
 
-            # Route waypoint computation (offset from head fire to northern flank)
             if "BULLDOZER" in uid:
-                # Heavy machinery routes along the village perimeter
+                # Bulldozer creates firebreak south of village Borodulikha
                 wp = [
                     [u_lat, u_lon],
-                    [u_lat + (fire_lat - u_lat) * 0.4, u_lon + 0.015],
-                    [fire_lat + 0.008, fire_lon + 0.012],
-                    [fire_lat + 0.004, fire_lon + 0.006]
+                    [50.7020, 80.9150],
+                    [50.6850, 80.9080],
+                    [50.6720, 80.9020]
                 ]
                 eta = 22
                 clearance = "Северная минерализованная полоса (безопасно)"
             elif "AVIA" in uid:
-                # Direct air route
+                # Direct tactical air corridor from Airbase
                 wp = [
-                    [u_lat, u_lon],
-                    [fire_lat + 0.02, fire_lon - 0.01],
+                    [50.5200, 80.6500],
+                    [50.5800, 80.7800],
+                    [50.6300, 80.8600],
                     [fire_lat, fire_lon]
                 ]
                 eta = 12
-                clearance = "Воздушный коридор Семей-Бородулиха открыт"
+                clearance = "Воздушный коридор Семей-Бородулиха (высота 350м)"
             else:
-                # Fire engine (АЦ-40) along main forest road and northern clearing
+                # Fire engine (АЦ-40) along main forest road
                 wp = [
                     [u_lat, u_lon],
-                    [u_lat + 0.010, u_lon - 0.008],
-                    [fire_lat + 0.012, fire_lon - 0.004],
-                    [fire_lat + 0.005, fire_lon - 0.002]
+                    [50.6320, 80.8650],
+                    [50.6410, 80.8780],
+                    [50.6480, 80.8870]
                 ]
                 eta = 16
                 clearance = "Северная просека №2 (свободна от задымления)"

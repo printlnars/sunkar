@@ -48,41 +48,41 @@ export const WeatherModal: React.FC<WeatherModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75">
-      <div className="w-full max-w-md bg-[#131d31] rounded-lg border border-[#2a3a5a] p-5 shadow-2xl relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+      <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 p-6 shadow-2xl relative">
         
         {/* Close button */}
         <button
           onClick={onClose}
-          className="absolute top-4 right-4 p-1.5 rounded bg-[#1e2e48] hover:bg-[#283d60] text-slate-400 hover:text-white transition-colors cursor-pointer"
+          className="absolute top-4 right-4 p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
         >
           <X className="w-4 h-4" />
         </button>
 
         {/* Title */}
-        <div className="flex items-center gap-2.5 mb-4 pb-2.5 border-b border-[#233350]">
-          <div className="p-2 rounded bg-[#1c2e4f] text-sky-400">
+        <div className="flex items-center gap-3 mb-5 pb-3 border-b border-slate-100">
+          <div className="p-2 rounded-xl bg-blue-50 text-blue-700 border border-blue-100">
             <Sliders className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="text-sm font-bold text-white">
-              Метеорологические параметры (Казгидромет)
+            <h3 className="text-sm font-bold text-slate-900">
+              Метеорологические параметры
             </h3>
-            <p className="text-xs text-slate-400">
-              Расчетная модель распространения огня Ротермела
+            <p className="text-xs text-slate-500">
+              Казгидромет • Модель Ротермела
             </p>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3.5">
+        <form onSubmit={handleSubmit} className="space-y-4">
           
           {/* Wind Speed */}
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <div className="flex justify-between text-xs font-semibold">
-              <span className="flex items-center gap-1.5 text-sky-300">
+              <span className="flex items-center gap-1.5 text-blue-700">
                 <Wind className="w-3.5 h-3.5" /> Скорость ветра:
               </span>
-              <span className="font-mono text-white text-xs font-bold">
+              <span className="font-mono text-slate-900 text-xs font-bold">
                 {windSpeed.toFixed(1)} м/с
               </span>
             </div>
@@ -93,17 +93,17 @@ export const WeatherModal: React.FC<WeatherModalProps> = ({
               step="0.5"
               value={windSpeed}
               onChange={(e) => setWindSpeed(parseFloat(e.target.value))}
-              className="w-full h-1.5 bg-[#0e1728] rounded appearance-none cursor-pointer accent-[#0284c7]"
+              className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-blue-600"
             />
           </div>
 
           {/* Wind Direction */}
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <div className="flex justify-between text-xs font-semibold">
-              <span className="flex items-center gap-1.5 text-amber-300">
+              <span className="flex items-center gap-1.5 text-amber-700">
                 <Gauge className="w-3.5 h-3.5" /> Направление ветра:
               </span>
-              <span className="font-mono text-white text-xs font-bold">
+              <span className="font-mono text-slate-900 text-xs font-bold">
                 {windDir}° ({getDirectionName(windDir)})
               </span>
             </div>
@@ -114,17 +114,17 @@ export const WeatherModal: React.FC<WeatherModalProps> = ({
               step="5"
               value={windDir}
               onChange={(e) => setWindDir(parseInt(e.target.value))}
-              className="w-full h-1.5 bg-[#0e1728] rounded appearance-none cursor-pointer accent-[#d97706]"
+              className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-amber-600"
             />
           </div>
 
           {/* Temperature */}
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <div className="flex justify-between text-xs font-semibold">
-              <span className="flex items-center gap-1.5 text-red-300">
+              <span className="flex items-center gap-1.5 text-rose-700">
                 <Thermometer className="w-3.5 h-3.5" /> Температура воздуха:
               </span>
-              <span className="font-mono text-white text-xs font-bold">
+              <span className="font-mono text-slate-900 text-xs font-bold">
                 {temp.toFixed(1)}°C
               </span>
             </div>
@@ -135,17 +135,17 @@ export const WeatherModal: React.FC<WeatherModalProps> = ({
               step="1"
               value={temp}
               onChange={(e) => setTemp(parseFloat(e.target.value))}
-              className="w-full h-1.5 bg-[#0e1728] rounded appearance-none cursor-pointer accent-[#dc2626]"
+              className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-rose-600"
             />
           </div>
 
           {/* Humidity */}
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <div className="flex justify-between text-xs font-semibold">
-              <span className="flex items-center gap-1.5 text-blue-300">
+              <span className="flex items-center gap-1.5 text-cyan-700">
                 <Droplets className="w-3.5 h-3.5" /> Влажность воздуха:
               </span>
-              <span className="font-mono text-white text-xs font-bold">
+              <span className="font-mono text-slate-900 text-xs font-bold">
                 {humidity.toFixed(0)}%
               </span>
             </div>
@@ -156,25 +156,25 @@ export const WeatherModal: React.FC<WeatherModalProps> = ({
               step="1"
               value={humidity}
               onChange={(e) => setHumidity(parseFloat(e.target.value))}
-              className="w-full h-1.5 bg-[#0e1728] rounded appearance-none cursor-pointer accent-[#2563eb]"
+              className="w-full h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-cyan-600"
             />
           </div>
 
           {/* Action buttons */}
-          <div className="pt-3 flex items-center justify-end gap-2 border-t border-[#233350]">
+          <div className="pt-4 flex items-center justify-end gap-2.5 border-t border-slate-100">
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-1.5 rounded bg-[#1e2e48] hover:bg-[#283d60] text-slate-300 text-xs font-medium transition-colors cursor-pointer"
+              className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
             >
               Отмена
             </button>
             <button
               type="submit"
-              className="px-4 py-1.5 rounded bg-[#0284c7] hover:bg-[#0369a1] text-white text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5"
+              className="px-4 py-2 rounded-xl bg-[#1e3a5f] hover:bg-[#162d4a] text-white text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span>Пересчитать модель распространения</span>
+              <span>Пересчитать модель</span>
             </button>
           </div>
 

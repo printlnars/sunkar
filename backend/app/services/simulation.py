@@ -12,8 +12,8 @@ from app.services.vision_stream import VisionStreamService
 class SimulationService:
     """
     Simulation State Engine for Sunkar AI.
-    Handles active incidents, vehicle positioning, dispatch approval state,
-    weather updates, and scenario resets.
+    Handles active incidents, vehicle positioning with clear start bases & destination objectives,
+    dispatch approval state, weather updates, and scenario resets.
     """
 
     def __init__(self):
@@ -48,7 +48,7 @@ class SimulationService:
             asset_lat = 50.7180
             asset_lon = 80.9250
 
-            # Calculate fire spread polygons
+            # Calculate realistic fire spread polygons
             spread_polys = FireSpreadCalculator.calculate_spread(
                 center_lat=center_lat,
                 center_lon=center_lon,
@@ -58,30 +58,21 @@ class SimulationService:
                 humidity_pct=self.weather.humidity_percent
             )
 
-            # Estimate time to critical asset
-            time_to_asset, dist_km = FireSpreadCalculator.estimate_time_to_asset(
-                fire_lat=center_lat,
-                fire_lon=center_lon,
-                asset_lat=asset_lat,
-                asset_lon=asset_lon,
-                wind_speed_ms=self.weather.wind_speed_ms,
-                wind_direction_deg=self.weather.wind_direction_deg,
-                temperature_c=self.weather.temperature_c,
-                humidity_pct=self.weather.humidity_percent
-            )
-
-            # Define initial emergency units
+            # Realistic Emergency Units with Start Bases & Target Objectives
             self.emergency_units = {
                 "UNIT-04-AC40": EmergencyUnit(
                     id="UNIT-04-AC40",
                     name="Пожарный расчет №4 (ПЧ-4)",
                     callsign="Тайфун-4",
                     unit_type="FIRE_ENGINE",
-                    base_station="ПЧ-4 г. Семей (Юго-Западный кордон)",
-                    lat=50.6200,
-                    lon=80.8500,
+                    base_station="ПЧ-4 г. Семей (Юго-Западный пост)",
+                    base_lat=50.5950,
+                    base_lon=80.8200,
+                    lat=50.6220,
+                    lon=80.8520,
                     target_lat=50.6550,
-                    target_lon=80.8900,
+                    target_lon=80.8880,
+                    target_name="Рубеж водяного заслона (Сев. просека №2)",
                     status=UnitStatus.STANDBY,
                     personnel_count=6,
                     water_capacity_l=8000,
@@ -96,10 +87,13 @@ class SimulationService:
                     callsign="Гранит-7",
                     unit_type="HEAVY_BULLDOZER",
                     base_station="Опорный пункт с. Бородулиха",
-                    lat=50.7150,
-                    lon=80.9200,
-                    target_lat=50.6800,
-                    target_lon=80.9100,
+                    base_lat=50.7220,
+                    base_lon=80.9320,
+                    lat=50.7020,
+                    lon=80.9160,
+                    target_lat=50.6720,
+                    target_lon=80.9020,
+                    target_name="Рубеж опашки минерализованной полосы",
                     status=UnitStatus.STANDBY,
                     personnel_count=3,
                     fuel_percent=85,
@@ -112,10 +106,13 @@ class SimulationService:
                     callsign="Борт UP-MI801",
                     unit_type="HELICOPTER_MI8",
                     base_station="Авиабаза Казавиаспас Семей",
-                    lat=50.3500,
-                    lon=80.2500,
+                    base_lat=50.4800,
+                    base_lon=80.4500,
+                    lat=50.5850,
+                    lon=80.7600,
                     target_lat=50.6482,
                     target_lon=80.8924,
+                    target_name="Точка сброса воды ВСУ-5 (Очаг Кв.45)",
                     status=UnitStatus.STANDBY,
                     personnel_count=4,
                     water_capacity_l=5000,
@@ -136,7 +133,7 @@ class SimulationService:
                 weather=self.weather,
                 area_sq_m=2450.0,
                 detection_confidence=0.984,
-                time_to_asset_min=42,  # Exactly matching the scenario narrative (42 mins)
+                time_to_asset_min=42,
                 critical_asset_name=critical_asset,
                 head_ros_m_min=32.4
             )
@@ -176,9 +173,6 @@ class SimulationService:
             )
 
     def approve_dispatch(self) -> Incident:
-        """
-        Operator clicks 'Утвердить план перехвата'
-        """
         if not self.incident:
             return None
 
@@ -186,7 +180,7 @@ class SimulationService:
         self.incident.dispatch_plan.approved_at = datetime.datetime.now()
         self.incident.status = "DISPATCH_APPROVED"
 
-        # Update emergency units to EN_ROUTE
+        # Update emergency units to EN_ROUTE with realistic active speeds
         for uid, unit in self.emergency_units.items():
             unit.status = UnitStatus.EN_ROUTE
             if unit.unit_type == "FIRE_ENGINE":

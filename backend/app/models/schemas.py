@@ -75,6 +75,10 @@ class InterceptRoute(BaseModel):
     unit_name: str
     route_name: str
     waypoints: List[List[float]]
+    start_name: Optional[str] = None
+    start_coords: Optional[List[float]] = None
+    target_name: Optional[str] = None
+    target_coords: Optional[List[float]] = None
     estimated_arrival_minutes: int
     safe_passage_clearance: str
 
@@ -113,10 +117,13 @@ class EmergencyUnit(BaseModel):
     callsign: str
     unit_type: str  # "FIRE_ENGINE", "HEAVY_BULLDOZER", "HELICOPTER_MI8", "DRONE_SQUAD", "GROUND_CREW"
     base_station: str
+    base_lat: Optional[float] = None
+    base_lon: Optional[float] = None
     lat: float
     lon: float
     target_lat: Optional[float] = None
     target_lon: Optional[float] = None
+    target_name: Optional[str] = None
     status: UnitStatus
     personnel_count: int
     water_capacity_l: Optional[int] = None
