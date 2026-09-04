@@ -8,6 +8,7 @@ from app.models.schemas import (
 from app.services.fire_spread import FireSpreadCalculator
 from app.services.ai_agent import SunkarAIAgent
 from app.services.vision_stream import VisionStreamService
+from app.services.fire_detector import fire_detector_service
 
 class SimulationService:
     """
@@ -166,7 +167,7 @@ class SimulationService:
                 spread_polygons=spread_polys,
                 dispatch_plan=dispatch_plan,
                 telemetry_log=[
-                    {"time": "14:02:10", "event": "YOLOv11: Зафиксирован дым (Confidence: 98.4%)"},
+                    {"time": "14:02:10", "event": "AI Vision: Первичное срабатывание по дыму в кадре БПЛА (анализ YOLOv8n-Fire)"},
                     {"time": "14:02:11", "event": "Sunkar Brain: Вектор Ротермела рассчитан (Южный ветер 7.4 м/с)"},
                     {"time": "14:02:12", "event": "AI Agent: Сформирован боевой план перехвата (ETA до с. Бородулиха: 42 мин)"}
                 ]
@@ -217,16 +218,44 @@ class SimulationService:
         self.incident.spread_polygons = spread_polys
         self.incident.weather = self.weather
 
+    def register_drone_fire(self, camera_id: str, confidence: float) -> Optional[Incident]:
+        """
+        Реальное срабатывание «пожар» от борта: фиксируем источник и уверенность,
+        добавляем событие в журнал аудита. Направление сил — отдельно (approve_dispatch).
+        """
+        if not self.incident:
+            return None
+        cam = VisionStreamService.get_camera(camera_id)
+        self.incident.camera_id = camera_id
+        self.incident.detection_confidence = round(min(max(confidence, 0.0), 0.999), 3)
+        self.incident.detected_at = datetime.datetime.now()
+        self.incident.status = "AI_ANALYZED"
+        self.incident.telemetry_log.append({
+            "time": datetime.datetime.now().strftime("%H:%M:%S"),
+            "event": f"⚠️ YOLOv8n-Fire: пожар на борту «{cam.name}» "
+                     f"({round(confidence * 100)}%) — {cam.location_name}"
+        })
+        return self.incident
+
     def get_full_state(self) -> Dict[str, Any]:
         cam = VisionStreamService.get_camera(self.current_camera_id)
-        detections = VisionStreamService.generate_current_detections(self.current_camera_id, incident_active=True)
+
+        # Скриптованные детекции удалены: боксы теперь рисует реальная модель
+        # (YOLOv8n-Fire) через /api/vision/analysis/{camera_id} и таймлайн видео.
+        detections = []
+
+        # Достоверность ИИ — реальная максимальная уверенность модели по видео БПЛА
+        # (если анализ завершён), иначе 0.0 = «данных ещё нет».
+        real_conf = fire_detector_service.max_detection_confidence(self.current_camera_id)
+        if self.incident is not None:
+            self.incident.detection_confidence = round(real_conf, 3) if real_conf else 0.0
 
         return {
             "incident": self.incident.model_dump() if self.incident else None,
             "units": [u.model_dump() for u in self.emergency_units.values()],
             "active_camera": cam.model_dump(),
             "available_cameras": [c.model_dump() for c in VisionStreamService.get_all_cameras()],
-            "detections": [d.model_dump() for d in detections],
+            "detections": detections,
             "weather": self.weather.model_dump() if self.weather else None,
             "scenario_id": self.active_scenario_id
         }

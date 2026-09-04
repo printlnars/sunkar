@@ -1,11 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Header } from './components/Header';
 import { TacticalMap } from './components/TacticalMap';
-import { VisionMonitor } from './components/VisionMonitor';
+import { VisionMonitor, type FireAlertInfo } from './components/VisionMonitor';
 import { AIIncidentCard } from './components/AIIncidentCard';
 import { ResourcePanel } from './components/ResourcePanel';
 import { WeatherModal } from './components/WeatherModal';
+import { DroneVideoUploadModal } from './components/DroneVideoUploadModal';
 import type { SystemState } from './types';
+import { resolveDroneMedia } from './droneMedia';
+import { DroneMedia } from './components/DroneMedia';
 import { 
   Map as MapIcon, 
   Camera, 
@@ -19,7 +22,9 @@ import {
   ChevronRight,
   Upload,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Siren,
+  X
 } from 'lucide-react';
 
 type MainView = 'map' | 'vision' | 'logs';
@@ -30,14 +35,41 @@ export const App: React.FC = () => {
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isApproving, setIsApproving] = useState<boolean>(false);
   const [isWeatherModalOpen, setIsWeatherModalOpen] = useState<boolean>(false);
-  
+
+  // Медиаисточники бортов (default/загруженные оператором) с сервера
+  const [droneMedia, setDroneMedia] = useState<Record<string, string>>({});
+  // Тревога «обнаружен пожар»
+  const [fireAlert, setFireAlert] = useState<FireAlertInfo | null>(null);
+  const [alarmPhase, setAlarmPhase] = useState<'idle' | 'ask' | 'sending' | 'sent' | 'error'>('idle');
+
   // Clean workspace state
   const [mainView, setMainView] = useState<MainView>('map');
   const [drawerOpen, setDrawerOpen] = useState<boolean>(true);
   const [activeDrawerTab, setActiveDrawerTab] = useState<DrawerTab>('incident');
   const [pipOpen, setPipOpen] = useState<boolean>(true); // Picture-in-picture mini UAV widget on map
+  // Борт, для которого открыто окно загрузки видео (null = окно закрыто)
+  const [uploadTargetId, setUploadTargetId] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
+
+  // Актуальный видеопоток борта: загрузка оператора > файл по умолчанию
+  const mediaUrlFor = (cameraId?: string | null) => {
+    const id = cameraId ?? '';
+    return droneMedia[id] || resolveDroneMedia(id || undefined);
+  };
+
+  const refreshDroneMedia = async () => {
+    try {
+      const res = await fetch('/api/vision/media');
+      if (!res.ok) return;
+      const data = await res.json();
+      const map: Record<string, string> = {};
+      (data.cameras || []).forEach((c: any) => { if (c.url) map[c.camera_id] = c.url; });
+      setDroneMedia(map);
+    } catch {
+      // backend недоступен — остаёмся на статическом маппинге
+    }
+  };
 
   // Web Audio chime generator for dispatch sound feedback
   const playTacticalSound = (type: 'ALERT' | 'CONFIRM') => {
@@ -69,6 +101,11 @@ export const App: React.FC = () => {
       console.warn('Audio context not allowed yet', e);
     }
   };
+
+  // Initial HTTP Fetch (список медиа бортов — чтобы PIP/превью показывали загруженные видео)
+  useEffect(() => {
+    refreshDroneMedia();
+  }, []);
 
   // Initial HTTP Fetch
   const fetchState = async () => {
@@ -184,6 +221,42 @@ export const App: React.FC = () => {
       });
     } catch (err) {
       console.error('Failed to reset scenario:', err);
+    }
+  };
+
+  // Тревога: пожар подтверждён моделью на одном из бортов
+  const handleFireDetected = (alert: FireAlertInfo) => {
+    playTacticalSound('ALERT');
+    setFireAlert(alert);
+    setAlarmPhase('ask');
+  };
+
+  const handleFireDismiss = () => {
+    setFireAlert(null);
+    setAlarmPhase('idle');
+  };
+
+  // Оператор принял решение: направить силы на обнаруженный очаг
+  const handleFireSendForces = async () => {
+    if (!fireAlert) return;
+    setAlarmPhase('sending');
+    try {
+      const alertRes = await fetch('/api/vision/fire-alert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ camera_id: fireAlert.cameraId, confidence: fireAlert.confidence })
+      });
+      if (!alertRes.ok) throw new Error();
+      const alertData = await alertRes.json();
+      const incidentId = alertData.incident?.id || state?.incident?.id;
+      if (incidentId) {
+        const approveRes = await fetch(`/api/incidents/${incidentId}/approve`, { method: 'POST' });
+        if (!approveRes.ok) throw new Error();
+      }
+      playTacticalSound('CONFIRM');
+      setAlarmPhase('sent');
+    } catch {
+      setAlarmPhase('error');
     }
   };
 
@@ -342,7 +415,7 @@ export const App: React.FC = () => {
                 className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-semibold cursor-pointer transition-colors"
               >
                 <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                <span>{state?.active_camera?.name || 'БПЛА «Сункар-1»'} (30 FPS)</span>
+                <span>{state?.active_camera?.name || 'БПЛА «Альфа»'} (30 FPS)</span>
               </button>
             )}
 
@@ -405,7 +478,7 @@ export const App: React.FC = () => {
                     <div className="px-3 py-1.5 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between text-xs text-white">
                       <div className="flex items-center gap-1.5 font-bold text-[11px] text-sky-400">
                         <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                        <span>{state?.active_camera?.name || 'БПЛА «Сункар-1»'}</span>
+                        <span>{state?.active_camera?.name || 'БПЛА «Альфа»'}</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <button 
@@ -428,14 +501,12 @@ export const App: React.FC = () => {
                       onClick={() => setMainView('vision')}
                       className="h-40 bg-black cursor-pointer relative group flex items-center justify-center overflow-hidden"
                     >
-                      <img 
-                        src={localStorage.getItem('sunkar_custom_drone_media') || 'https://images.unsplash.com/photo-1602980085566-4c715cbd77e3?auto=format&fit=crop&w=600&q=80'} 
-                        alt="БПЛА Поток" 
+                      <DroneMedia
+                        src={mediaUrlFor(state?.active_camera?.id)}
+                        fallbackSrc="https://images.unsplash.com/photo-1602980085566-4c715cbd77e3?auto=format&fit=crop&w=600&q=80"
+                        alt="БПЛА Поток"
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                       />
-                      <div className="absolute top-2 left-2 bg-slate-900/80 px-2 py-0.5 rounded text-[9px] font-mono text-emerald-400 font-bold">
-                        YOLOv11: 98.4%
-                      </div>
                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-bold transition-opacity">
                         Нажмите для перехода к БПЛА
                       </div>
@@ -451,8 +522,10 @@ export const App: React.FC = () => {
                 <VisionMonitor
                   activeCamera={state?.active_camera || null}
                   availableCameras={state?.available_cameras || []}
-                  detections={state?.detections || []}
                   onSelectCamera={handleSelectCamera}
+                  onFireDetected={handleFireDetected}
+                  serverMedia={droneMedia}
+                  onRequestUpload={() => setUploadTargetId(state?.active_camera?.id ?? null)}
                 />
               </div>
             )}
@@ -625,9 +698,10 @@ export const App: React.FC = () => {
                         onClick={() => setMainView('vision')}
                         className="h-36 rounded-xl bg-black overflow-hidden relative cursor-pointer group shadow-inner"
                       >
-                        <img 
-                          src={localStorage.getItem('sunkar_custom_drone_media') || 'https://images.unsplash.com/photo-1602980085566-4c715cbd77e3?auto=format&fit=crop&w=600&q=80'} 
-                          alt="Мини-превью" 
+                        <DroneMedia
+                          src={mediaUrlFor(state?.active_camera?.id)}
+                          fallbackSrc="https://images.unsplash.com/photo-1602980085566-4c715cbd77e3?auto=format&fit=crop&w=600&q=80"
+                          alt="Мини-превью"
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                         />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center text-white text-xs font-bold transition-opacity">
@@ -649,11 +723,11 @@ export const App: React.FC = () => {
                         </button>
 
                         <button
-                          onClick={() => setMainView('vision')}
+                          onClick={() => setUploadTargetId(state?.active_camera?.id ?? null)}
                           className="py-2 px-3 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
                         >
                           <Upload className="w-3.5 h-3.5 text-blue-700" />
-                          <span>Загрузить GIF</span>
+                          <span>Видео на борт</span>
                         </button>
                       </div>
                     </div>
@@ -690,7 +764,20 @@ export const App: React.FC = () => {
                                   <span className="text-[10px] text-slate-400">Переключить</span>
                                 )}
                               </div>
-                              <div className="text-[11px] text-slate-500">Локация: {cam.location_name}</div>
+                              <div className="flex items-center justify-between mt-1">
+                                <span className="text-[11px] text-slate-500">Локация: {cam.location_name}</span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setUploadTargetId(cam.id);
+                                  }}
+                                  className="flex items-center gap-1 text-[10px] font-bold text-blue-700 hover:text-blue-900 px-1.5 py-0.5 rounded-md hover:bg-blue-50 transition-colors cursor-pointer"
+                                  title={`Загрузить видео на ${cam.name}`}
+                                >
+                                  <Upload className="w-3 h-3" />
+                                  Видео
+                                </button>
+                              </div>
                             </div>
                           );
                         })}
@@ -705,11 +792,11 @@ export const App: React.FC = () => {
                       </div>
                       <div className="flex justify-between py-1 border-b border-slate-100">
                         <span className="text-slate-500">Нейросеть:</span>
-                        <span className="font-mono text-emerald-700 font-bold">YOLOv11-Fire</span>
+                        <span className="font-mono text-emerald-700 font-bold">YOLOv8n-Fire (D-Fire)</span>
                       </div>
                       <div className="flex justify-between py-1 border-b border-slate-100">
-                        <span className="text-slate-500">Инференс:</span>
-                        <span className="font-mono text-slate-900 font-bold">14.8 мс (30 FPS)</span>
+                        <span className="text-slate-500">Выборка:</span>
+                        <span className="font-mono text-slate-900 font-bold">4 кадра/с (CPU, анализ фоновый)</span>
                       </div>
                       <div className="flex justify-between py-1">
                         <span className="text-slate-500">Сенсор:</span>
@@ -729,6 +816,22 @@ export const App: React.FC = () => {
 
       </div>
 
+      {/* Окно загрузки видео на конкретный борт */}
+      <DroneVideoUploadModal
+        open={uploadTargetId !== null}
+        preselectedCameraId={uploadTargetId}
+        cameras={state?.available_cameras ?? []}
+        onClose={() => setUploadTargetId(null)}
+        onUploaded={(cameraId, url) => {
+          // Версия в URL, чтобы повторная загрузка того же файла
+          // перезапустила анализ и тревогу, а браузер не отдал кэш
+          const stamped = url.startsWith('/videos/') && !url.includes('?')
+            ? `${url}?v=${Date.now()}`
+            : url;
+          setDroneMedia((m) => ({ ...m, [cameraId]: stamped }));
+        }}
+      />
+
       {/* Meteorological Simulator Modal */}
       <WeatherModal
         isOpen={isWeatherModalOpen}
@@ -736,6 +839,107 @@ export const App: React.FC = () => {
         weather={state?.weather || null}
         onUpdateWeather={handleUpdateWeather}
       />
+
+      {/* Тревога: модель обнаружила пожар на борту */}
+      {fireAlert && alarmPhase !== 'idle' && (
+        <div className="fixed inset-0 z-[300] flex items-start justify-center p-6 bg-slate-950/70 backdrop-blur-xs">
+          <div className={`w-full max-w-lg rounded-2xl border-2 shadow-2xl overflow-hidden ${
+            alarmPhase === 'sent' ? 'border-emerald-400' : 'border-rose-500'
+          }`}>
+            
+            {/* Header */}
+            <div className={`px-5 py-4 flex items-center gap-3 ${alarmPhase === 'sent' ? 'bg-emerald-600' : 'bg-rose-600'} text-white`}>
+              <div className={`p-2 rounded-xl ${alarmPhase === 'sent' ? 'bg-emerald-700' : 'bg-rose-700/70'} animate-pulse`}>
+                <Siren className="w-7 h-7" />
+              </div>
+              <div className="flex-1">
+                <div className="font-extrabold text-sm uppercase tracking-widest">
+                  {alarmPhase === 'sent' ? 'Силы направлены' : alarmPhase === 'error' ? 'Ошибка вызова' : 'Обнаружен пожар'}
+                </div>
+                <div className="text-[11px] text-white/85 font-semibold">
+                  {fireAlert.cameraName} • {fireAlert.locationName}
+                </div>
+              </div>
+              {alarmPhase !== 'sending' && (
+                <button onClick={handleFireDismiss} className="p-1.5 rounded-lg bg-white/15 hover:bg-white/25 transition-colors cursor-pointer">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Body */}
+            <div className="px-5 py-5 bg-white space-y-4">
+              {alarmPhase === 'ask' && (
+                <>
+                  <div className="flex items-end gap-3">
+                    <div>
+                      <div className="text-3xl font-black text-rose-600">
+                        {(fireAlert.confidence * 100).toFixed(0)}%
+                      </div>
+                      <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                        уверенность модели
+                      </div>
+                    </div>
+                    <div className="flex-1 text-xs text-slate-600 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2">
+                      YOLOv8n-Fire подтвердила открытый огонь в видеопотоке борта. Направить силы МЧС к очагу?
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2">
+                    <button
+                      onClick={handleFireSendForces}
+                      className="w-full py-3 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-extrabold text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md active:scale-[0.99]"
+                    >
+                      <Siren className="w-4 h-4 animate-pulse" />
+                      Тревога — направить силы
+                    </button>
+                    <button
+                      onClick={handleFireDismiss}
+                      className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+                    >
+                      Не направлять силы
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {alarmPhase === 'sending' && (
+                <div className="text-sm font-bold text-slate-700 text-center py-4">
+                  <span className="inline-block w-4 h-4 border-2 border-rose-500 border-t-transparent rounded-full animate-spin mr-2 align-middle" />
+                  Поднимаем силы МЧС…
+                </div>
+              )}
+
+              {alarmPhase === 'sent' && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-emerald-700 font-bold text-sm">
+                    <CheckCircle2 className="w-5 h-5" />
+                    Боевой план утверждён — расчёты выдвигаются к очагу.
+                  </div>
+                  <button
+                    onClick={handleFireDismiss}
+                    className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    Готово
+                  </button>
+                </div>
+              )}
+
+              {alarmPhase === 'error' && (
+                <div className="space-y-3">
+                  <div className="text-sm font-bold text-rose-600">Не удалось отправить силы. Backend доступен?</div>
+                  <button
+                    onClick={() => setAlarmPhase('ask')}
+                    className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+                  >
+                    Попробовать снова
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

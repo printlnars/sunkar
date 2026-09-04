@@ -23,12 +23,13 @@ export const WeatherModal: React.FC<WeatherModalProps> = ({
   weather,
   onUpdateWeather
 }) => {
-  if (!isOpen || !weather) return null;
+  // Хуки до раннего выхода — иначе нарушаются правила хуков при закрытой модалке
+  const [windSpeed, setWindSpeed] = useState<number>(weather?.wind_speed_ms ?? 0);
+  const [windDir, setWindDir] = useState<number>(weather?.wind_direction_deg ?? 0);
+  const [temp, setTemp] = useState<number>(weather?.temperature_c ?? 0);
+  const [humidity, setHumidity] = useState<number>(weather?.humidity_percent ?? 0);
 
-  const [windSpeed, setWindSpeed] = useState<number>(weather.wind_speed_ms);
-  const [windDir, setWindDir] = useState<number>(weather.wind_direction_deg);
-  const [temp, setTemp] = useState<number>(weather.temperature_c);
-  const [humidity, setHumidity] = useState<number>(weather.humidity_percent);
+  if (!isOpen || !weather) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

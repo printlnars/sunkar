@@ -12,11 +12,18 @@ import {
 } from 'react-leaflet';
 import L from 'leaflet';
 import { 
+  Building2,
   Flame, 
+  Home,
   Info,
   Map as MapIcon,
-  Navigation2
+  Navigation2,
+  Route,
+  Target,
+  Truck,
+  Wind
 } from 'lucide-react';
+import { glyphSvg } from '../mapGlyphs';
 import type { Incident, EmergencyUnit, WeatherData } from '../types';
 
 interface TacticalMapProps {
@@ -41,8 +48,8 @@ const createFireIcon = () => {
     html: `
       <div style="position: relative; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;">
         <div class="animate-radar-ring" style="position: absolute; width: 44px; height: 44px; border-radius: 50%; background: rgba(239, 68, 68, 0.45); border: 1.5px solid #ef4444;"></div>
-        <div style="position: relative; width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border: 2.5px solid #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(220,38,38,0.7);">
-          <span style="font-size: 16px;">🔥</span>
+        <div style="position: relative; width: 32px; height: 32px; border-radius: 50%; background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border: 2.5px solid #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 16px rgba(220,38,38,0.7); color: #ffffff;">
+          ${glyphSvg('flame', 17, '#ffffff')}
         </div>
       </div>
     `,
@@ -52,16 +59,16 @@ const createFireIcon = () => {
   });
 };
 
-// 2. Base Station Start Point Marker (🏢 Точка старта / Базирование)
+// 2. Base Station Start Point Marker (Точка старта / Базирование)
 const createBaseIcon = (name: string, type: 'STATION' | 'AIRBASE') => {
-  const icon = type === 'AIRBASE' ? '🛫' : '🏢';
+  const iconName = type === 'AIRBASE' ? 'plane' : 'building-2';
   return L.divIcon({
     className: 'custom-base-marker',
     html: `
       <div style="display: flex; flex-direction: column; align-items: center;">
-        <div style="display: flex; align-items: center; gap: 4px; background: #0f172a; border: 1.5px solid #38bdf8; border-radius: 6px; padding: 3px 6px; color: #f8fafc; font-size: 10px; font-weight: 700; white-space: nowrap; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
-          <span>${icon}</span>
-          <span>${name}</span>
+        <div style="display: flex; align-items: center; gap: 4px; background: #0f172a; border: 1.5px solid #38bdf8; border-radius: 6px; padding: 3px 6px; color: #7dd3fc; font-size: 10px; font-weight: 700; white-space: nowrap; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
+          ${glyphSvg(iconName, 13, '#7dd3fc')}
+          <span style="color: #f8fafc;">${name}</span>
         </div>
         <div style="width: 2px; height: 5px; background: #38bdf8;"></div>
         <div style="width: 6px; height: 6px; border-radius: 50%; background: #38bdf8; border: 1px solid #ffffff;"></div>
@@ -73,14 +80,14 @@ const createBaseIcon = (name: string, type: 'STATION' | 'AIRBASE') => {
   });
 };
 
-// 3. Target Destination Objective Marker (🎯 Рубеж перехвата / Пункт назначения)
+// 3. Target Destination Objective Marker (Рубеж перехвата / Пункт назначения)
 const createTargetIcon = (label: string, color: string) => {
   return L.divIcon({
     className: 'custom-target-marker',
     html: `
       <div style="display: flex; flex-direction: column; align-items: center;">
         <div style="display: flex; align-items: center; gap: 4px; background: #ffffff; border: 2px solid ${color}; border-radius: 6px; padding: 2px 6px; color: #0f172a; font-size: 10px; font-weight: 800; white-space: nowrap; box-shadow: 0 4px 12px rgba(0,0,0,0.25);">
-          <span>🎯</span>
+          ${glyphSvg('target', 12, color)}
           <span>${label}</span>
         </div>
         <div style="width: 2px; height: 5px; background: ${color};"></div>
@@ -93,17 +100,17 @@ const createTargetIcon = (label: string, color: string) => {
   });
 };
 
-// 4. Moving Tactical Vehicle Pin (🚒 Транспорт на марше)
+// 4. Moving Tactical Vehicle Pin (Транспорт на марше)
 const createUnitIcon = (unit: EmergencyUnit) => {
   const isEnRoute = unit.status === 'EN_ROUTE';
-  let emoji = '🚒';
+  let glyph = 'truck';
   let bgGradient = 'linear-gradient(135deg, #059669 0%, #047857 100%)';
 
   if (unit.unit_type === 'HELICOPTER_MI8') {
-    emoji = '🚁';
+    glyph = 'helicopter';
     bgGradient = 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)';
   } else if (unit.unit_type === 'HEAVY_BULLDOZER') {
-    emoji = '🚜';
+    glyph = 'tractor';
     bgGradient = 'linear-gradient(135deg, #d97706 0%, #b45309 100%)';
   }
 
@@ -112,7 +119,7 @@ const createUnitIcon = (unit: EmergencyUnit) => {
     html: `
       <div style="display: flex; flex-direction: column; align-items: center; position: relative;">
         <div style="width: 34px; height: 34px; border-radius: 50%; background: ${bgGradient}; border: 2.5px solid #ffffff; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.35); position: relative;">
-          <span style="font-size: 16px;">${emoji}</span>
+          ${glyphSvg(glyph, 16, '#ffffff')}
           ${isEnRoute ? `<span style="position: absolute; top: -2px; right: -2px; width: 10px; height: 10px; border-radius: 50%; background: #10b981; border: 2px solid #ffffff;"></span>` : ''}
         </div>
         <div style="background: rgba(15, 23, 42, 0.9); color: #ffffff; border: 1px solid rgba(255,255,255,0.25); border-radius: 4px; padding: 1.5px 6px; font-size: 9px; font-weight: 800; margin-top: 2px; white-space: nowrap; box-shadow: 0 2px 6px rgba(0,0,0,0.25);">
@@ -133,7 +140,7 @@ const createVillageIcon = () => {
     html: `
       <div style="display: flex; flex-direction: column; align-items: center;">
         <div style="display: flex; align-items: center; gap: 4px; background: #ffffff; border: 2px solid #d97706; border-radius: 8px; padding: 3px 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.2); white-space: nowrap;">
-          <span style="font-size: 14px;">🏡</span>
+          ${glyphSvg('house', 14, '#d97706')}
           <div style="display: flex; flex-direction: column;">
             <span style="font-size: 11px; font-weight: 800; color: #1e293b;">с. Бородулиха</span>
             <span style="font-size: 9px; font-weight: 700; color: #d97706;">Угроза через 42 мин</span>
@@ -271,21 +278,24 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({
             onClick={handleFocusFire}
             className="px-2.5 py-1 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
           >
-            🔥 К очагу
+            <Flame className="w-3.5 h-3.5" />
+            <span>К очагу</span>
           </button>
 
           <button
             onClick={handleFocusVillage}
             className="px-2.5 py-1 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
           >
-            🏡 К селу
+            <Home className="w-3.5 h-3.5" />
+            <span>К селу</span>
           </button>
 
           <button
             onClick={handleFocusInterception}
             className="px-2.5 py-1 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
           >
-            🎯 К рубежам
+            <Target className="w-3.5 h-3.5" />
+            <span>К рубежам</span>
           </button>
 
           <button
@@ -351,8 +361,9 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({
               }}
             >
               <Tooltip sticky>
-                <div className="font-bold text-xs text-slate-800">
-                  💨 Шлейф атмосферного задымления (PM2.5 / CO2)
+                <div className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                  <Wind className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Шлейф атмосферного задымления (PM2.5 / CO2)</span>
                 </div>
               </Tooltip>
             </Polygon>
@@ -426,8 +437,9 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({
                   }}
                 >
                   <Tooltip sticky>
-                    <div className="font-bold text-xs text-slate-900">
-                      🔥 Эпицентр очага возгорания (780°C)
+                    <div className="font-bold text-xs text-slate-900 flex items-center gap-1.5">
+                      <Flame className="w-3.5 h-3.5 text-rose-600" />
+                      <span>Эпицентр очага возгорания (780°C)</span>
                     </div>
                   </Tooltip>
                 </Polygon>
@@ -494,7 +506,7 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({
             </Popup>
           </Marker>
 
-          {/* 5. Base Stations (🏢 Пункты старта транспорта) */}
+          {/* 5. Base Stations (Пункты старта транспорта) */}
           {showBases && (
             <>
               {/* Base Station ПЧ-4 */}
@@ -538,7 +550,7 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({
             </>
           )}
 
-          {/* 6. Target Objectives (🎯 Пункты назначения и рубежи перехвата) */}
+          {/* 6. Target Objectives (Пункты назначения и рубежи перехвата) */}
           {showBases && (
             <>
               {/* Target 1: Рубеж водяного заслона АЦ-40 */}
@@ -734,7 +746,8 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({
               showFireArea ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'text-slate-400 hover:text-slate-700'
             }`}
           >
-            🔥 <span>Область горения</span>
+            <Flame className="w-3.5 h-3.5" />
+            <span>Область горения</span>
           </button>
 
           <button
@@ -743,7 +756,8 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({
               showSmokePlume ? 'bg-slate-100 text-slate-800 border border-slate-300' : 'text-slate-400 hover:text-slate-700'
             }`}
           >
-            💨 <span>Задымление</span>
+            <Wind className="w-3.5 h-3.5" />
+            <span>Задымление</span>
           </button>
 
           <button
@@ -752,7 +766,8 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({
               showUnits ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'text-slate-400 hover:text-slate-700'
             }`}
           >
-            🚒 <span>Транспорт</span>
+            <Truck className="w-3.5 h-3.5" />
+            <span>Транспорт</span>
           </button>
 
           <button
@@ -761,7 +776,8 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({
               showBases ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-400 hover:text-slate-700'
             }`}
           >
-            🏢 <span>Базы и цели</span>
+            <Building2 className="w-3.5 h-3.5" />
+            <span>Базы и цели</span>
           </button>
 
           <button
@@ -770,7 +786,8 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({
               showRoutes ? 'bg-indigo-50 text-indigo-700 border border-indigo-200' : 'text-slate-400 hover:text-slate-700'
             }`}
           >
-            🛣 <span>Маршруты</span>
+            <Route className="w-3.5 h-3.5" />
+            <span>Маршруты</span>
           </button>
 
           <button
@@ -794,7 +811,9 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({
 
             <div className="space-y-1.5 text-[11px]">
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-rose-600 border border-white flex items-center justify-center text-[7px]">🔥</span>
+                <span className="w-4 h-4 rounded-full bg-rose-600 border border-white flex items-center justify-center">
+                  <Flame className="w-2.5 h-2.5 text-white" />
+                </span>
                 <span>Эпицентр очага (Кв. 45)</span>
               </div>
 
@@ -809,17 +828,19 @@ export const TacticalMap: React.FC<TacticalMapProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
-                <span>🏢</span>
+                <Building2 className="w-3.5 h-3.5 text-blue-700" />
                 <span>Точки старта (Базы ПЧ-4, Авиабаза)</span>
               </div>
 
               <div className="flex items-center gap-2">
-                <span>🎯</span>
+                <Target className="w-3.5 h-3.5 text-slate-500" />
                 <span>Пункты назначения (Рубежи перехвата)</span>
               </div>
 
               <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full bg-emerald-600 border border-white flex items-center justify-center text-[7px]">🚒</span>
+                <span className="w-4 h-4 rounded-full bg-emerald-600 border border-white flex items-center justify-center">
+                  <Truck className="w-2.5 h-2.5 text-white" />
+                </span>
                 <span>Транспорт МЧС на маршруте</span>
               </div>
             </div>

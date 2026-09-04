@@ -9,6 +9,7 @@
 - **Диспетчеризация и назначение служб**: Оперативное назначение свободных юнитов с расчетом времени прибытия (ETA).
 - **Живые видеопотоки и телеметрия**: Просмотр камер с дронов и городских камер в режиме реального времени.
 - **WebSocket синхронизация**: Мгновенное обновление статусов происшествий и перемещений отрядов.
+- **Реальный AI-детектор дыма и огня (YOLOv8n)**: детекции по видео БПЛА, синхронизированные с проигрыванием.
 
 ---
 
@@ -16,7 +17,33 @@
 
 - **Frontend**: React 18, TypeScript, Vite, Lucide Icons, CSS3 Glassmorphism
 - **Backend**: Python 3.10+, FastAPI, WebSockets, Pydantic, Uvicorn
+- **AI Vision**: Ultralytics YOLOv8n (дообучение на D-Fire), OpenCV
 - **AI Integration**: Google Gemini API / Heuristic AI Agent
+
+---
+
+## 🤖 Реальная детекция дыма и огня (не скрипт)
+
+Скриптованные боксы удалены. Детекции по видео БПЛА считает модель
+**YOLOv8n**, дообученная на датасете D-Fire (классы: `smoke`, `fire`):
+
+- веса `fire-smoke-yolov8n.pt` (~6 МБ) скачиваются автоматически с Hugging Face
+  при первом анализе в `backend/app/ml/weights/` (папка в .gitignore);
+- бэкенд декодирует видео БПЛА (по умолчанию `frontend/public/videos/pojar-1.mp4`
+  для камеры `cam-drone-01`), прогоняет выборку кадров (~4 кадра/с, размер 640)
+  и строит **таймлайн детекций** `GET /api/vision/analysis/{camera_id}`;
+- таймлайн кэшируется в `backend/app/ml/analysis/` — повторная обработка не нужна;
+- фронт синхронизирует боксы с `video.currentTime`, поэтому рамки привязаны
+  ровно к кадру на экране, без мигания и дрейфа;
+- достоверность в карточке инцидента теперь берётся из реальной модели
+  (максимальная уверенность по видео);
+- несколько лучших кадров с боксами сохраняются в `backend/app/ml/preview/`
+  для визуальной проверки.
+
+Добавление видео для другого БПЛА: положить файл в `frontend/public/videos/`
+и указать соответствие в `DRONE_VIDEOS` (`backend/app/services/fire_detector.py`).
+
+Лицензия модели: AGPL-3.0 (наследие Ultralytics).
 
 ---
 
@@ -28,7 +55,7 @@
 cd backend
 # Активация виртуального окружения
 source ../venv/bin/activate  # или python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt   # включает ultralytics + opencv (скачивание ~200-400 МБ)
 
 # Запуск FastAPI сервера
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload

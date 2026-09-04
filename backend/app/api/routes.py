@@ -1,6 +1,8 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
+
+from app.services.fire_detector import fire_detector_service, FIRE_ALERT_CONF
 
 from app.services.simulation import simulation_engine
 from app.services.vision_stream import VisionStreamService
@@ -27,6 +29,87 @@ async def health_check():
 @router.get("/state")
 async def get_system_state():
     return simulation_engine.get_full_state()
+
+@router.get("/vision/analysis/{camera_id}")
+async def get_vision_analysis(camera_id: str):
+    """
+    Реальный AI-анализ видео БПЛА (YOLOv8n Fire/Smoke).
+    Возвращает статус и таймлайн детекций, синхронизируемый фронтом по времени видео.
+    """
+    video = fire_detector_service.video_for_camera(camera_id)
+    if video is None:
+        expected = fire_detector_service.expected_video_name(camera_id)
+        return {
+            "state": "missing",
+            "message": (
+                f"Видео {expected} для борта ещё не загружено — положите файл "
+                "в frontend/public/videos/"
+                if expected
+                else "Для этой камеры не настроено видео для анализа"
+            ),
+            "timeline": [],
+        }
+    return fire_detector_service.status(video)
+
+@router.get("/vision/media")
+async def list_vision_media():
+    """Текущий медиаисточник каждого борта (default/upload) для UI."""
+    return {
+        "cameras": [
+            {"camera_id": cid, **fire_detector_service.media_info(cid)}
+            for cid in VisionStreamService.CAMERAS
+        ]
+    }
+
+@router.post("/vision/media/{camera_id}")
+async def upload_vision_media(camera_id: str, file: UploadFile = File(...)):
+    """
+    Оператор загружает видео для конкретного борта через интерфейс.
+    Файл становится активным видео борта, анализ пересчитывается автоматически.
+    """
+    if camera_id not in VisionStreamService.CAMERAS:
+        raise HTTPException(status_code=404, detail="Камера не найдена")
+
+    if not (file.content_type or "").startswith("video/"):
+        raise HTTPException(status_code=400, detail="Нужен видеофайл (MP4/WEBM)")
+
+    try:
+        path = fire_detector_service.save_upload(camera_id, file.filename or "video.mp4", file)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # первый же запрос статуса запустит фоновый анализ нового файла
+    return {
+        "success": True,
+        "camera_id": camera_id,
+        "url": f"/videos/{path.name}",
+        "name": path.name,
+        "source": "upload",
+        "analysis": fire_detector_service.status(path)["state"],
+    }
+
+class FireAlertRequest(BaseModel):
+    camera_id: str
+    confidence: float = FIRE_ALERT_CONF
+
+@router.post("/vision/fire-alert")
+async def register_fire_alert(payload: FireAlertRequest):
+    """
+    Подтверждённое срабатывание «пожар» с борта: обновляет инцидент и журнал.
+    Решение «направить силы» принимается оператором через approve_dispatch.
+    """
+    camera = VisionStreamService.get_camera(payload.camera_id)
+    incident = simulation_engine.register_drone_fire(
+        camera_id=payload.camera_id,
+        confidence=payload.confidence
+    )
+    await ws_manager.broadcast({
+        "type": "FIRE_ALERT",
+        "camera": camera.model_dump(),
+        "confidence": payload.confidence,
+        "state": simulation_engine.get_full_state()
+    })
+    return {"success": True, "incident": incident.model_dump() if incident else None}
 
 @router.post("/incidents/{incident_id}/approve")
 async def approve_incident_dispatch(incident_id: str):

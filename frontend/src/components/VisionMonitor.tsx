@@ -4,54 +4,257 @@ import {
   Camera,
   Upload,
   Radio,
-  Image as ImageIcon
+  Video as VideoIcon
 } from 'lucide-react';
-import type { CameraFeed, BoundingBox } from '../types';
+import type { CameraFeed } from '../types';
+import { getAssignedMedia, resolveDroneMedia, looksLikeVideo } from '../droneMedia';
+import { DroneMedia } from './DroneMedia';
+
+interface DetectionBox {
+  label: string; // 'smoke' | 'fire' (YOLOv8n, D-Fire)
+  confidence: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+interface TimelineSample {
+  t: number; // секунды в видео
+  boxes: DetectionBox[];
+}
+
+export interface FireAlertInfo {
+  cameraId: string;
+  cameraName: string;
+  locationName: string;
+  confidence: number;
+  time?: number | null;
+}
 
 interface VisionMonitorProps {
   activeCamera: CameraFeed | null;
   availableCameras: CameraFeed[];
-  detections: BoundingBox[];
   onSelectCamera: (cameraId: string) => void;
+  /** Вызывается при подтверждённом срабатывании «пожар» по таймлайну борта. */
+  onFireDetected?: (alert: FireAlertInfo) => void;
+  /** Открыть окно загрузки видео для активного борта (модал живёт на уровне App). */
+  onRequestUpload?: () => void;
+  /** Актуальные видеопотоки бортов с сервера (операторская загрузка > файл по умолчанию). */
+  serverMedia?: Record<string, string>;
 }
+
+interface AnalysisState {
+  status: 'idle' | 'analyzing' | 'ready' | 'missing' | 'error';
+  progress: number;
+  message?: string;
+  modelName?: string;
+  modelDataset?: string;
+  timeline: TimelineSample[];
+}
+
+// Пожар по конкретному файлу борта сигналим оператору один раз за сессию
+// (пока не загружен новый файл или не обновлена страница)
+const fireAlertNotified = new Set<string>();
 
 export const VisionMonitor: React.FC<VisionMonitorProps> = ({
   activeCamera,
   availableCameras,
-  detections,
-  onSelectCamera
+  onSelectCamera,
+  onFireDetected,
+  onRequestUpload,
+  serverMedia
 }) => {
-  const [visionMode, setVisionMode] = useState<'RGB' | 'THERMAL' | 'CUSTOM_MEDIA'>('RGB');
-  const [customMediaUrl, setCustomMediaUrl] = useState<string>(() => {
-    return localStorage.getItem('sunkar_custom_drone_media') || 'https://images.unsplash.com/photo-1602980085566-4c715cbd77e3?auto=format&fit=crop&w=1200&q=80';
-  });
-  const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
-  const [inputUrl, setInputUrl] = useState<string>('');
+  const [visionMode, setVisionMode] = useState<'RGB' | 'THERMAL' | 'CUSTOM_MEDIA'>(() =>
+    looksLikeVideo(resolveDroneMedia(activeCamera?.id)) ? 'CUSTOM_MEDIA' : 'RGB'
+  );
+  const [customMediaUrl, setCustomMediaUrl] = useState<string>(() => resolveDroneMedia(activeCamera?.id));
+  const [customMediaIsVideo, setCustomMediaIsVideo] = useState<boolean>(() => looksLikeVideo(resolveDroneMedia(activeCamera?.id)));
+
+  // Реальная детекция YOLOv8n (дым/огонь) по видео БПЛА
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [analysis, setAnalysis] = useState<AnalysisState>({ status: 'idle', progress: 0, timeline: [] });
+  const [currentBoxes, setCurrentBoxes] = useState<DetectionBox[]>([]);
+
+  // Анализ доступен только для штатного видео БПЛА, раздаваемого из /videos/.
+  // Для произвольных загруженных файлов таймлайн модели не строится — боксы не рисуем.
+  const videoFeedActive =
+    visionMode === 'CUSTOM_MEDIA' && customMediaIsVideo && customMediaUrl.startsWith('/videos/');
+
+  // Опрос бэкенда: анализ идёт в фоне, после готовности таймлайн отдаётся целиком.
+  useEffect(() => {
+    setCurrentBoxes([]);
+    if (!videoFeedActive || !activeCamera?.id) {
+      setAnalysis({ status: 'idle', progress: 0, timeline: [] });
+      return;
+    }
+
+    let cancelled = false;
+    let timer: number | undefined;
+
+    // missing/error повторяем с паузой — видео может ещё доливаться на диск,
+    // а backend перезапускаться. Сдаёмся только после MAX_RETRIES попыток.
+    const MAX_RETRIES = 10;
+    const RETRY_DELAY_MS = 4000;
+
+    const poll = async (attempt: number) => {
+      try {
+        const res = await fetch(`/api/vision/analysis/${activeCamera.id}`);
+        if (cancelled) return;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (cancelled) return;
+
+        if (data.state === 'ready') {
+          setAnalysis({
+            status: 'ready',
+            progress: 1,
+            message: data.message,
+            modelName: data.model?.name,
+            modelDataset: data.model?.dataset,
+            timeline: data.timeline ?? [],
+          });
+
+          // Пожар подтверждён моделью по видео борта → уведомление оператору (1 раз на файл)
+          const summary = data.detection_summary;
+          if (summary?.has_fire && onFireDetected) {
+            const alertKey = `${activeCamera.id}:${customMediaUrl}`;
+            if (!fireAlertNotified.has(alertKey)) {
+              fireAlertNotified.add(alertKey);
+              onFireDetected({
+                cameraId: activeCamera.id,
+                cameraName: activeCamera.name,
+                locationName: activeCamera.location_name,
+                confidence: summary.best_fire_confidence ?? 0,
+                time: summary.best_fire_t,
+              });
+            }
+          }
+          return; // больше не опрашиваем
+        }
+        if (data.state === 'analyzing' || data.state === 'starting') {
+          setAnalysis({
+            status: 'analyzing',
+            progress: data.progress ?? 0,
+            message: data.message,
+            timeline: [],
+          });
+          timer = window.setTimeout(() => poll(0), 1200);
+          return;
+        }
+        // missing / error — вероятно, файл ещё загружается или backend перезапускается
+        const next = attempt + 1;
+        if (next >= MAX_RETRIES) {
+          setAnalysis({
+            status: data.state === 'missing' ? 'missing' : 'error',
+            progress: 0,
+            message: data.message,
+            timeline: [],
+          });
+          return;
+        }
+        setAnalysis({
+          status: data.state === 'missing' ? 'missing' : 'error',
+          progress: 0,
+          message: data.message,
+          timeline: [],
+        });
+        timer = window.setTimeout(() => poll(next), RETRY_DELAY_MS);
+      } catch {
+        if (cancelled) return;
+        const next = attempt + 1;
+        if (next >= MAX_RETRIES) {
+          setAnalysis({
+            status: 'error',
+            progress: 0,
+            message: 'AI-сервис недоступен (запустите backend)',
+            timeline: [],
+          });
+          return;
+        }
+        timer = window.setTimeout(() => poll(next), RETRY_DELAY_MS);
+      }
+    };
+
+    poll(0);
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [videoFeedActive, activeCamera?.id, customMediaUrl, serverMedia]);
+
+  // Синхронизация боксов с текущим временем видео (video.currentTime → ближайший сэмпл).
+  useEffect(() => {
+    if (analysis.status !== 'ready' || analysis.timeline.length === 0) {
+      setCurrentBoxes([]);
+      return;
+    }
+
+    const timeline = analysis.timeline;
+    let idx = 0;
+    let prevKey = '';
+    let raf = 0;
+
+    const step = () => {
+      const t = videoRef.current?.currentTime ?? 0;
+      // идём вперёд по сэмплам, при перемотке/лупе — назад
+      while (idx < timeline.length - 1 && timeline[idx + 1].t <= t + 0.1) idx++;
+      while (idx > 0 && timeline[idx].t > t + 0.35) idx--;
+
+      const sample = timeline[idx];
+      const boxes = sample && sample.t <= t + 0.35 ? sample.boxes : [];
+      const key = boxes.map((b) => `${b.label}:${b.confidence}:${b.x}:${b.y}`).join('|');
+      if (key !== prevKey) {
+        prevKey = key;
+        setCurrentBoxes(boxes);
+      }
+      raf = requestAnimationFrame(step);
+    };
+
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [analysis.status, analysis.timeline]);
+
+  const aiStatusLabel = (() => {
+    if (!videoFeedActive) {
+      return visionMode === 'CUSTOM_MEDIA'
+        ? 'YOLOv8n-Fire (D-Fire): детекция по штатному видео БПЛА'
+        : 'Симуляция канала (RGB/FLIR) — без ИИ-детекции';
+    }
+    if (analysis.status === 'ready') {
+      return `${analysis.modelName ?? 'YOLOv8n-Fire'} (${analysis.modelDataset ?? 'D-Fire'}): ${
+        currentBoxes.length > 0 ? `${currentBoxes.length} объект(ов) в кадре` : 'детекций в кадре нет'
+      }`;
+    }
+    if (analysis.status === 'analyzing') {
+      return `YOLOv8n-Fire: анализ видео ${Math.round(analysis.progress * 100)}%`;
+    }
+    if (analysis.status === 'missing') return `YOLOv8n-Fire: ${analysis.message || 'видео не загружено'}`;
+    if (analysis.status === 'error') return `YOLOv8n-Fire: ${analysis.message || 'анализ недоступен (backend?)'}`;
+    return 'YOLOv8n-Fire (D-Fire)';
+  })();
+
+  const aiStatusColor =
+    analysis.status === 'ready' && currentBoxes.length > 0
+      ? 'text-emerald-400'
+      : analysis.status === 'analyzing'
+        ? 'text-amber-400'
+        : analysis.status === 'error' || analysis.status === 'missing'
+          ? 'text-rose-400'
+          : 'text-slate-400';
+
+  // При выборе борта показываем его актуальный медиапоток:
+  // операторская загрузка (с сервера) > назначенный файл по умолчанию.
+  useEffect(() => {
+    const id = activeCamera?.id;
+    if (!id) return;
+    const url = serverMedia?.[id] ?? getAssignedMedia(id) ?? resolveDroneMedia(id);
+    setCustomMediaUrl(url);
+    setCustomMediaIsVideo(looksLikeVideo(url));
+    if (looksLikeVideo(url)) setVisionMode('CUSTOM_MEDIA');
+  }, [activeCamera?.id, serverMedia]);
   
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  // Handle local file upload (GIF, MP4, WebM, PNG, JPG)
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const objectUrl = URL.createObjectURL(file);
-      setCustomMediaUrl(objectUrl);
-      localStorage.setItem('sunkar_custom_drone_media', objectUrl);
-      setVisionMode('CUSTOM_MEDIA');
-      setShowUploadModal(false);
-    }
-  };
-
-  const handleApplyUrl = () => {
-    if (inputUrl.trim()) {
-      setCustomMediaUrl(inputUrl.trim());
-      localStorage.setItem('sunkar_custom_drone_media', inputUrl.trim());
-      setVisionMode('CUSTOM_MEDIA');
-      setShowUploadModal(false);
-      setInputUrl('');
-    }
-  };
 
   // Canvas-based real-time 4K / Thermal simulation
   useEffect(() => {
@@ -193,20 +396,11 @@ export const VisionMonitor: React.FC<VisionMonitorProps> = ({
     };
   }, [visionMode]);
 
-  const isVideoFile = customMediaUrl.endsWith('.mp4') || customMediaUrl.endsWith('.webm') || customMediaUrl.includes('video');
+
 
   return (
     <div className="flex flex-col h-full hub-card overflow-hidden shadow-sm relative bg-slate-900 rounded-2xl">
       
-      {/* Hidden File Picker */}
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileUpload} 
-        accept="image/gif,image/jpeg,image/png,image/webp,video/mp4,video/webm" 
-        className="hidden" 
-      />
-
       {/* 1. Top UAV Navigation Bar & Mode Switcher */}
       <div className="flex flex-wrap items-center justify-between px-5 py-3 bg-white border-b border-slate-200 z-20 gap-3 shrink-0">
         
@@ -219,7 +413,7 @@ export const VisionMonitor: React.FC<VisionMonitorProps> = ({
 
           <div>
             <div className="text-xs font-extrabold text-slate-900 flex items-center gap-2">
-              <span>{activeCamera?.name || 'БПЛА «Сункар-1» (DJI Matrice 350 RTK)'}</span>
+              <span>{activeCamera?.name || 'БПЛА «Альфа» (DJI Matrice 350 RTK)'}</span>
               <span className="px-2 py-0.2 rounded-md bg-emerald-100 text-emerald-800 text-[10px] font-mono font-bold">
                 ONLINE
               </span>
@@ -230,7 +424,7 @@ export const VisionMonitor: React.FC<VisionMonitorProps> = ({
           </div>
         </div>
 
-        {/* Video Mode Switchers & Custom GIF/Video Button */}
+        {/* Переключатель режимов канала и загрузка видео борта */}
         <div className="flex items-center gap-2">
           
           <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs">
@@ -263,46 +457,36 @@ export const VisionMonitor: React.FC<VisionMonitorProps> = ({
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <ImageIcon className="w-3.5 h-3.5" />
-              Кастомная GIF/Видео
+              <VideoIcon className="w-3.5 h-3.5" />
+              Видеопоток
             </button>
           </div>
 
-          {/* Upload GIF / Video Button */}
+          {/* Загрузка видео на активный борт (окно открывается на уровне App) */}
           <button
-            onClick={() => setShowUploadModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-bold transition-colors cursor-pointer"
-            title="Загрузить свою GIF или Видео пожара"
+            onClick={() => onRequestUpload?.()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-300 text-xs font-bold transition-colors cursor-pointer"
+            title={`Загрузить видео для ${activeCamera?.name || 'борта'}: файл станет видеопотоком и будет проанализирован моделью`}
           >
-            <Upload className="w-3.5 h-3.5 text-blue-700" />
-            <span>Загрузить GIF</span>
+            <Upload className="w-3.5 h-3.5 text-sky-700" />
+            <span>Видео на борт</span>
           </button>
 
         </div>
 
-      </div>
-
-      {/* 2. Main High-Tech Viewport with YOLOv11 Telemetry Overlay */}
+      </div>        {/* 2. Main High-Tech Viewport with YOLOv8n Telemetry Overlay */}
       <div className="relative flex-1 bg-black overflow-hidden flex items-center justify-center min-h-[360px]">
         
-        {/* Content: Custom Video / GIF vs Simulated Canvas */}
+        {/* Контент: видеопоток борта или симуляция канала */}
         {visionMode === 'CUSTOM_MEDIA' ? (
-          isVideoFile ? (
-            <video 
-              src={customMediaUrl} 
-              autoPlay 
-              loop 
-              muted 
-              playsInline 
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <img 
-              src={customMediaUrl} 
-              alt="БПЛА Видеопоток" 
-              className="w-full h-full object-cover"
-            />
-          )
+          <DroneMedia
+            src={customMediaUrl}
+            fallbackSrc="https://images.unsplash.com/photo-1602980085566-4c715cbd77e3?auto=format&fit=crop&w=1200&q=80"
+            isVideo={customMediaIsVideo}
+            mediaRef={videoRef}
+            alt="БПЛА Видеопоток"
+            className="w-full h-full object-cover"
+          />
         ) : (
           <canvas 
             ref={canvasRef} 
@@ -326,7 +510,7 @@ export const VisionMonitor: React.FC<VisionMonitorProps> = ({
           </div>
           <div className="text-[11px] pt-1 border-t border-slate-700 flex items-center justify-between text-slate-300">
             <span>Нейросеть:</span>
-            <strong className="text-emerald-400 font-bold">YOLOv11s-Fire (14.8 мс • 30 FPS)</strong>
+            <strong className={`${aiStatusColor} font-bold text-right`}>{aiStatusLabel}</strong>
           </div>
         </div>
 
@@ -339,39 +523,43 @@ export const VisionMonitor: React.FC<VisionMonitorProps> = ({
           <div className="absolute h-40 w-px bg-white/40"></div>
         </div>
 
-        {/* YOLOv11 Real-time Bounding Boxes */}
-        {detections.map((box) => (
-          <div
-            key={box.id}
-            className="absolute border-2 border-rose-500 rounded-xl bg-rose-500/15 flex flex-col justify-between p-1.5 pointer-events-none shadow-lg shadow-rose-950/40"
-            style={{
-              left: `${box.x * 100}%`,
-              top: `${box.y * 100}%`,
-              width: `${box.w * 100}%`,
-              height: `${box.h * 100}%`,
-            }}
-          >
-            <div className="bg-rose-600 text-white font-bold text-[10px] px-2.5 py-0.5 rounded-md shadow-md self-start flex items-center gap-1.5">
-              <Flame className="w-3.5 h-3.5 animate-pulse" />
-              <span>Дым лесного пожара: {(box.confidence * 100).toFixed(1)}% (~{box.area_sq_m.toFixed(0)} м²)</span>
+        {/* Реальные детекции YOLOv8n (дым/огонь), синхронизированные с video.currentTime */}
+        {currentBoxes.map((box, i) => {
+          const isFire = box.label === 'fire';
+          const border = isFire ? 'border-rose-500 bg-rose-500/15' : 'border-sky-400/80 bg-sky-400/10';
+          const chip = isFire
+            ? 'bg-rose-600 text-white'
+            : 'bg-slate-800/90 text-sky-200 border border-sky-400/40';
+          const label = isFire ? 'Пламя' : 'Дым';
+          return (
+            <div
+              key={i}
+              className={`absolute border-2 rounded-xl ${border} flex items-start p-1 pointer-events-none shadow-lg shadow-slate-950/40`}
+              style={{
+                left: `${box.x * 100}%`,
+                top: `${box.y * 100}%`,
+                width: `${box.w * 100}%`,
+                height: `${box.h * 100}%`,
+              }}
+            >
+              <div className={`${chip} font-bold text-[10px] px-2 py-0.5 rounded-md shadow-md self-start flex items-center gap-1`}>
+                {isFire && <Flame className="w-3 h-3 animate-pulse" />}
+                <span>{label}: {(box.confidence * 100).toFixed(1)}%</span>
+              </div>
             </div>
-
-            <div className="bg-slate-900/95 text-amber-300 font-bold text-[9px] px-2 py-0.5 rounded-md self-end border border-amber-500/50 shadow-sm">
-              СЕКТОР 45 • СЕМЕЙ ОРМАНЫ
-            </div>
-          </div>
-        ))}
+          );
+        })}
 
         {/* Bottom Switch Indicator Badge */}
         {visionMode === 'CUSTOM_MEDIA' && (
           <div className="absolute bottom-4 right-4 bg-slate-900/85 backdrop-blur-md border border-slate-700 text-white px-3 py-1.5 rounded-xl text-xs font-mono flex items-center gap-2 pointer-events-auto">
             <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
-            <span>Источник: Пользовательский медиапоток БПЛА</span>
-            <button 
-              onClick={() => fileInputRef.current?.click()}
+            <span>Поток: {customMediaUrl.split('/').pop()?.split('?')[0]}</span>
+            <button
+              onClick={() => onRequestUpload?.()}
               className="text-sky-400 hover:text-sky-200 underline text-[11px] cursor-pointer"
             >
-              Сменить файл
+              Заменить видео
             </button>
           </div>
         )}
@@ -410,115 +598,14 @@ export const VisionMonitor: React.FC<VisionMonitorProps> = ({
 
         {/* Quick Upload Action */}
         <button
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => onRequestUpload?.()}
           className="px-3 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
         >
           <Upload className="w-3.5 h-3.5" />
-          <span>Выбрать GIF с ПК</span>
+          <span>Видео на борт</span>
         </button>
 
       </div>
-
-      {/* 4. Modal: Upload Custom GIF / Video */}
-      {showUploadModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs">
-          <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 p-6 shadow-2xl space-y-4">
-            
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <div className="p-2 rounded-xl bg-blue-50 text-blue-700">
-                  <ImageIcon className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">Загрузка GIF / Видео БПЛА</h3>
-                  <p className="text-xs text-slate-500">Добавьте анимацию или видео лесного пожара</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Option A: Pick Local File */}
-            <div 
-              onClick={() => fileInputRef.current?.click()}
-              className="p-6 rounded-2xl border-2 border-dashed border-slate-300 hover:border-blue-500 bg-slate-50 hover:bg-blue-50/50 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all text-center"
-            >
-              <Upload className="w-8 h-8 text-blue-600" />
-              <div className="text-xs font-bold text-slate-800">
-                Нажмите для выбора файла с компьютера
-              </div>
-              <div className="text-[11px] text-slate-500">
-                Поддерживаются .GIF, .MP4, .WEBM, .JPG, .PNG
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 text-xs text-slate-400 font-bold uppercase">
-              <div className="h-px bg-slate-200 flex-1" />
-              <span>или укажите ссылку (URL)</span>
-              <div className="h-px bg-slate-200 flex-1" />
-            </div>
-
-            {/* Option B: Input URL */}
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-2">
-                <input 
-                  type="text" 
-                  value={inputUrl}
-                  onChange={(e) => setInputUrl(e.target.value)}
-                  placeholder="https://.../forest-fire.gif" 
-                  className="flex-1 px-3.5 py-2 rounded-xl border border-slate-200 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                <button
-                  onClick={handleApplyUrl}
-                  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs cursor-pointer transition-colors"
-                >
-                  Применить
-                </button>
-              </div>
-            </div>
-
-            {/* Preset Demos */}
-            <div className="space-y-1.5 pt-2">
-              <div className="text-[11px] font-bold text-slate-500 uppercase">Демо-пресеты:</div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => {
-                    const url = 'https://images.unsplash.com/photo-1602980085566-4c715cbd77e3?auto=format&fit=crop&w=1200&q=80';
-                    setCustomMediaUrl(url);
-                    localStorage.setItem('sunkar_custom_drone_media', url);
-                    setVisionMode('CUSTOM_MEDIA');
-                    setShowUploadModal(false);
-                  }}
-                  className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-left text-xs font-semibold text-slate-700 transition-colors"
-                >
-                  🌲 Дым над сосновым лесом
-                </button>
-                <button
-                  onClick={() => {
-                    const url = 'https://images.unsplash.com/photo-1542401886-65d6c61db217?auto=format&fit=crop&w=1200&q=80';
-                    setCustomMediaUrl(url);
-                    localStorage.setItem('sunkar_custom_drone_media', url);
-                    setVisionMode('CUSTOM_MEDIA');
-                    setShowUploadModal(false);
-                  }}
-                  className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-left text-xs font-semibold text-slate-700 transition-colors"
-                >
-                  🔥 Очаг верхового пожара
-                </button>
-              </div>
-            </div>
-
-            {/* Footer Close */}
-            <div className="pt-3 border-t border-slate-100 flex justify-end">
-              <button
-                onClick={() => setShowUploadModal(false)}
-                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold cursor-pointer"
-              >
-                Закрыть
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
 
     </div>
   );

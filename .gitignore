@@ -39,6 +39,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# ML artifacts (weights, analysis cache, preview frames)
+backend/app/ml/
+
 # OS and IDE
 .DS_Store
 .DS_Store?
@@ -52,3 +55,4 @@ Thumbs.db
 !.vscode/extensions.json
 *.swp
 *.swo
+frontend/public/videos/*.mp4
