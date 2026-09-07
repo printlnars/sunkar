@@ -842,7 +842,7 @@ export const App: React.FC = () => {
 
       {/* Тревога: модель обнаружила пожар на борту */}
       {fireAlert && alarmPhase !== 'idle' && (
-        <div className="fixed inset-0 z-[300] flex items-start justify-center p-6 bg-slate-950/70 backdrop-blur-xs">
+        <div className="fixed inset-0 z-[9999] flex items-start justify-center p-6 bg-slate-950/70 backdrop-blur-xs">
           <div className={`w-full max-w-lg rounded-2xl border-2 shadow-2xl overflow-hidden ${
             alarmPhase === 'sent' ? 'border-emerald-400' : 'border-rose-500'
           }`}>

@@ -107,8 +107,9 @@ class FireDetectionService:
         return {"url": None, "name": DRONE_VIDEOS.get(camera_id).name if DRONE_VIDEOS.get(camera_id) else None,
                 "source": "missing"}
 
-    def save_upload(self, camera_id: str, filename: str, chunks) -> Path:
+    def save_upload(self, camera_id: str, filename: str, upload_file) -> Path:
         """Сохраняет загруженное видео борта и сбрасывает устаревший анализ."""
+        import shutil
         ext = Path(filename).suffix.lower()
         if ext not in ALLOWED_VIDEO_EXTS:
             raise ValueError(f"Неподдерживаемый формат: {ext}. Разрешены: {', '.join(ALLOWED_VIDEO_EXTS)}")
@@ -116,9 +117,24 @@ class FireDetectionService:
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_suffix(target.suffix + ".part")
         with open(tmp, "wb") as fh:
-            for chunk in chunks:
-                fh.write(chunk)
+            if hasattr(upload_file, "file"):
+                shutil.copyfileobj(upload_file.file, fh)
+            elif hasattr(upload_file, "read"):
+                shutil.copyfileobj(upload_file, fh)
+            else:
+                for chunk in upload_file:
+                    fh.write(chunk)
         tmp.replace(target)
+
+        # Также копируем в dist/videos для раздачи production Nginx
+        dist_videos = PROJECT_ROOT / "frontend" / "dist" / "videos"
+        if dist_videos.exists():
+            dist_target = dist_videos / target.name
+            try:
+                shutil.copy2(target, dist_target)
+            except Exception as e:
+                logger.warning(f"Could not copy to dist/videos: {e}")
+
         # анализ старого файла этого борта больше не актуален
         self._reset_analysis([target, DRONE_VIDEOS.get(camera_id)])
         return target

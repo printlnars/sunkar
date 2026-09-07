@@ -49,7 +49,7 @@ export const WeatherModal: React.FC<WeatherModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
       <div className="w-full max-w-md bg-white rounded-2xl border border-slate-200 p-6 shadow-2xl relative">
         
         {/* Close button */}

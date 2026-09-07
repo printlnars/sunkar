@@ -43,10 +43,11 @@ export const DroneVideoUploadModal: React.FC<DroneVideoUploadModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const prevOpenRef = useRef<boolean>(false);
 
-  // Сброс состояния при каждом открытии окна
+  // Сброс состояния ТОЛЬКО в момент первичного открытия окна (не при каждом тике WebSocket)
   useEffect(() => {
-    if (open) {
+    if (open && !prevOpenRef.current) {
       setTargetId(preselectedCameraId && cameras.some((c) => c.id === preselectedCameraId)
         ? preselectedCameraId
         : cameras[0]?.id ?? null);
@@ -56,6 +57,7 @@ export const DroneVideoUploadModal: React.FC<DroneVideoUploadModalProps> = ({
       setError(null);
       setDone(null);
     }
+    prevOpenRef.current = open;
   }, [open, preselectedCameraId, cameras]);
 
   // После успеха — короткое подтверждение и закрытие
@@ -68,12 +70,18 @@ export const DroneVideoUploadModal: React.FC<DroneVideoUploadModalProps> = ({
   if (!open) return null;
 
   const target = cameras.find((c) => c.id === targetId) ?? null;
-  const validFile = file && file.type.startsWith('video/');
+  const isVideoFile = (f: File | null | undefined): boolean => {
+    if (!f) return false;
+    if (f.type && f.type.startsWith('video/')) return true;
+    return /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(f.name);
+  };
+
+  const validFile = isVideoFile(file);
   const maxBytes = 2 * 1024 * 1024 * 1024;
 
   const pickFile = (f: File | undefined | null) => {
     if (!f) return;
-    if (!f.type.startsWith('video/')) {
+    if (!isVideoFile(f)) {
       setError('Поддерживаются только видеофайлы (MP4, WEBM, MOV).');
       return;
     }
@@ -107,7 +115,7 @@ export const DroneVideoUploadModal: React.FC<DroneVideoUploadModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
       <div className="w-full max-w-lg bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
         {/* Заголовок */}
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/60">
@@ -175,7 +183,7 @@ export const DroneVideoUploadModal: React.FC<DroneVideoUploadModalProps> = ({
             <input
               ref={inputRef}
               type="file"
-              accept="video/mp4,video/webm,video/quicktime"
+              accept="video/mp4,video/webm,video/quicktime,video/*,.mp4,.webm,.mov,.mkv"
               className="hidden"
               onChange={(e) => {
                 pickFile(e.target.files?.[0]);
@@ -196,6 +204,7 @@ export const DroneVideoUploadModal: React.FC<DroneVideoUploadModalProps> = ({
                 </div>
                 {!uploading && (
                   <button
+                    type="button"
                     onClick={() => inputRef.current?.click()}
                     className="text-[11px] font-bold text-blue-700 hover:text-blue-900 cursor-pointer shrink-0"
                   >
@@ -204,7 +213,8 @@ export const DroneVideoUploadModal: React.FC<DroneVideoUploadModalProps> = ({
                 )}
               </div>
             ) : (
-              <label
+              <div
+                onClick={() => inputRef.current?.click()}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
                 onDragLeave={() => setDragOver(false)}
                 onDrop={(e) => {
@@ -223,7 +233,7 @@ export const DroneVideoUploadModal: React.FC<DroneVideoUploadModalProps> = ({
                 </div>
                 <div className="text-xs font-bold text-slate-800">Выберите видео с компьютера</div>
                 <div className="text-[11px] text-slate-500">MP4, WEBM или MOV · до 2 ГБ</div>
-              </label>
+              </div>
             )}
 
             {target && (
